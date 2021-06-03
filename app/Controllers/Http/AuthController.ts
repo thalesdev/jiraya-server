@@ -73,7 +73,13 @@ export default class AuthController {
         expiresIn: '3d',
         name: 'Refresh Token',
       });
-      // #Improve: Deletar os tokens antigos
+
+      // tokens for delete
+      await Database.query()
+        .from('api_tokens')
+        .where('expires_at', '<=', DateTime.now().toISO())
+        .delete();
+
       return { access: accessToken, refresh: refreshToken, user: auth.user };
     } catch (error) {
       response.badRequest(error.messages ?? 'Invalid credentials');
@@ -94,12 +100,12 @@ export default class AuthController {
     const timeToExpirt = DateTime.fromJSDate(
       token.expiresAt as unknown as Date,
     ).diffNow('days').days;
+
     if (timeToExpirt <= 1) {
       const refreshToken = await auth.use('api').generate(user, {
         expiresIn: '3d',
         name: 'Refresh Token',
       });
-      // #Improve: deletar os tokens antigos
       return { access: accessToken, refresh: refreshToken, user: auth.user };
     } else {
       return { access: accessToken, user: auth.user };
@@ -118,7 +124,7 @@ export default class AuthController {
     user.save();
   }
 
-  public async recovery({ response, request }: HttpContextContract) {
+  public async recovery({ response, request, bouncer }: HttpContextContract) {
     const recoverySchema = schema.create({
       code: schema.string({}, [rules.minLength(6), rules.maxLength(6)]),
       password: schema.string({ trim: true }, [rules.confirmed()]),
@@ -134,6 +140,18 @@ export default class AuthController {
         return;
       }
       await passwordRecovery.load('user');
+      try {
+        await bouncer
+          .forUser(passwordRecovery.user)
+          .with('UserPolicy')
+          .authorize('confirmed');
+      } catch {
+        response.badRequest(
+          'You must first confirm your email, then retrieve your password',
+        );
+        return;
+      }
+
       passwordRecovery.user.password = password;
       await passwordRecovery.user.save();
       await passwordRecovery.delete();
@@ -142,7 +160,7 @@ export default class AuthController {
     }
   }
 
-  public async forget({ request, response }: HttpContextContract) {
+  public async forget({ request, response, bouncer }: HttpContextContract) {
     const forgetSchema = schema.create({
       email: schema.string({ trim: true, escape: true }, [rules.email()]),
     });
@@ -151,6 +169,15 @@ export default class AuthController {
       const user = await User.findBy('email', email);
       if (!user) {
         response.badRequest("User doesn't exist");
+        return;
+      }
+
+      try {
+        await bouncer.forUser(user).with('UserPolicy').authorize('confirmed');
+      } catch {
+        response.badRequest(
+          'You must first confirm your email, then retrieve your password',
+        );
         return;
       }
 
@@ -168,8 +195,7 @@ export default class AuthController {
           });
       });
     } catch (errors) {
-      console.log(errors);
-      response.badRequest(errors.messages);
+      response.badRequest(errors.messages ?? 'Bad Request');
     }
   }
 }
