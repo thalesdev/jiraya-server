@@ -1,6 +1,13 @@
 import { DateTime } from 'luxon';
 import Hash from '@ioc:Adonis/Core/Hash';
-import { column, beforeSave, BaseModel } from '@ioc:Adonis/Lucid/Orm';
+import {
+  column,
+  beforeSave,
+  BaseModel,
+  hasMany,
+  HasMany,
+} from '@ioc:Adonis/Lucid/Orm';
+import PasswordRecovery from './PasswordRecovery';
 
 export default class User extends BaseModel {
   @column({ isPrimary: true })
@@ -40,7 +47,7 @@ export default class User extends BaseModel {
   public maskSensitive: boolean;
 
   @column({ serializeAs: null })
-  public verificationCode: string;
+  public verificationCode: string | null;
 
   @column({ serializeAs: null })
   public password: string;
@@ -56,6 +63,9 @@ export default class User extends BaseModel {
 
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   public updatedAt: DateTime;
+
+  @hasMany(() => PasswordRecovery)
+  public recoveries: HasMany<typeof PasswordRecovery>;
 
   @beforeSave()
   public static async hashPassword(user: User) {

@@ -1,9 +1,11 @@
+import Mail from '@ioc:Adonis/Addons/Mail';
+import Database from '@ioc:Adonis/Lucid/Database';
+import User from 'App/Models/User';
 import { HttpContextContract } from '@ioc:Adonis/Core/HttpContext';
 import { schema, rules } from '@ioc:Adonis/Core/Validator';
 import { generate } from 'App/util/token';
 import { DateTime } from 'luxon';
-import Database from '@ioc:Adonis/Lucid/Database';
-import User from 'App/Models/User';
+import PasswordRecovery from 'App/Models/PasswordRecovery';
 
 export default class AuthController {
   public async signup({ request, response }: HttpContextContract) {
@@ -35,10 +37,20 @@ export default class AuthController {
         });
         userData.useTransaction(trx);
         const user = await userData.save();
-        //#Improve: chamar os mailers
+        await Mail.sendLater(message => {
+          message
+            .from('support@taliaapp.co')
+            .to(user.email)
+            .subject('Validate your account!')
+            .htmlView('emails/verify', {
+              user,
+            });
+        });
+
         return user;
       });
     } catch (error) {
+      console.log(error);
       response.badRequest(error.messages);
     }
   }
@@ -68,7 +80,7 @@ export default class AuthController {
     }
   }
 
-  public async refresh({ response, request, auth }: HttpContextContract) {
+  public async refresh({ response, auth }: HttpContextContract) {
     const user = auth.use('api').user;
     const token = auth.use('api').token;
     if (!user || !token || !token.expiresAt) {
@@ -94,11 +106,70 @@ export default class AuthController {
     }
   }
 
-  public async recovery(ctx) {
-    // #Improve: Recuperar a senha
+  public async verify({ request, response }: HttpContextContract) {
+    const code = request.input('code');
+    const user = await User.findBy('verificationCode', code);
+    if (!user) {
+      response.badRequest('Invalid Verification Code');
+      return;
+    }
+    user.verifiedAt = DateTime.now();
+    user.verificationCode = null;
+    user.save();
   }
 
-  public async forget(ctx) {
-    // #Improve: Enviar o email que perdeu a senha
+  public async recovery({ response, request }: HttpContextContract) {
+    const recoverySchema = schema.create({
+      code: schema.string({}, [rules.minLength(6), rules.maxLength(6)]),
+      password: schema.string({ trim: true }, [rules.confirmed()]),
+    });
+
+    try {
+      const { password, code } = await request.validate({
+        schema: recoverySchema,
+      });
+      const passwordRecovery = await PasswordRecovery.findBy('code', code);
+      if (!passwordRecovery) {
+        response.badRequest('Invalid recovery code.');
+        return;
+      }
+      await passwordRecovery.load('user');
+      passwordRecovery.user.password = password;
+      await passwordRecovery.user.save();
+      await passwordRecovery.delete();
+    } catch (errors) {
+      response.badRequest(errors.messages);
+    }
+  }
+
+  public async forget({ request, response }: HttpContextContract) {
+    const forgetSchema = schema.create({
+      email: schema.string({ trim: true, escape: true }, [rules.email()]),
+    });
+    try {
+      const { email } = await request.validate({ schema: forgetSchema });
+      const user = await User.findBy('email', email);
+      if (!user) {
+        response.badRequest("User doesn't exist");
+        return;
+      }
+
+      const { code } = await user.related('recoveries').create({
+        code: generate(6),
+      });
+      await Mail.sendLater(message => {
+        message
+          .from('support@taliaapp.co')
+          .to(user.email)
+          .subject('Recovery you password!')
+          .htmlView('emails/forget', {
+            code,
+            user,
+          });
+      });
+    } catch (errors) {
+      console.log(errors);
+      response.badRequest(errors.messages);
+    }
   }
 }

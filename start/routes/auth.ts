@@ -6,5 +6,8 @@ export default () => {
     Route.get('/refresh', 'AuthController.refresh')
       .as('refresh')
       .middleware('auth');
+    Route.post('/verify', 'AuthController.verify').as('verifyEmail');
+    Route.post('/forget', 'AuthController.forget').as('forgetPassword');
+    Route.post('/recovery', 'AuthController.recovery').as('recoveryPassword');
   }).prefix('auth');
 };
