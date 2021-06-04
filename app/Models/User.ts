@@ -8,6 +8,7 @@ import {
   HasMany,
 } from '@ioc:Adonis/Lucid/Orm';
 import PasswordRecovery from './PasswordRecovery';
+import File from './File';
 
 export default class User extends BaseModel {
   @column({ isPrimary: true })
@@ -66,6 +67,9 @@ export default class User extends BaseModel {
 
   @hasMany(() => PasswordRecovery)
   public recoveries: HasMany<typeof PasswordRecovery>;
+
+  @hasMany(() => File)
+  public files: HasMany<typeof File>;
 
   @beforeSave()
   public static async hashPassword(user: User) {
