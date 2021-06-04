@@ -20,6 +20,7 @@
 
 import Route from '@ioc:Adonis/Core/Route';
 import Auth from './auth';
+import File from './file';
 
 Route.get('/', async () => {
   return { hello: 'world xd' };
@@ -27,6 +28,7 @@ Route.get('/', async () => {
 
 Route.group(() => {
   Auth();
+  File();
 
   Route.group(() => {
     Route.get('/test', async ({ auth }) => {
