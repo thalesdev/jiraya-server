@@ -4,8 +4,13 @@ import User from 'App/Models/User';
 import { HttpContextContract } from '@ioc:Adonis/Core/HttpContext';
 import { schema, rules } from '@ioc:Adonis/Core/Validator';
 import { generate } from 'App/util/token';
+import { v4 as uuid } from 'uuid';
 import { DateTime } from 'luxon';
 import PasswordRecovery from 'App/Models/PasswordRecovery';
+import RefreshToken from 'App/Models/RefreshToken';
+
+const refreshTokenExpiresTime = () =>
+  DateTime.fromSeconds(DateTime.now().toSeconds() + 60 * 60 * 24 * 7); // 7 days
 
 export default class AuthController {
   public async signup({ request, response }: HttpContextContract) {
@@ -56,6 +61,8 @@ export default class AuthController {
   }
 
   public async signin({ response, request, auth }: HttpContextContract) {
+    const { 'user-agent': device } = request.headers();
+
     const loginSchema = schema.create({
       email: schema.string({ trim: true, escape: true }, [rules.email()]),
       password: schema.string({ trim: true }),
@@ -66,12 +73,13 @@ export default class AuthController {
         schema: loginSchema,
       });
       const accessToken = await auth.use('api').attempt(email, password, {
-        expiresIn: '30mins',
+        expiresIn: '15mins',
         name: 'Acess Token',
       });
-      const refreshToken = await auth.use('api').attempt(email, password, {
-        expiresIn: '3d',
-        name: 'Refresh Token',
+      const refreshToken = await auth.user?.related('refreshTokens').create({
+        token: uuid(),
+        name: device,
+        expiresAt: refreshTokenExpiresTime(),
       });
 
       // tokens for delete
@@ -86,30 +94,31 @@ export default class AuthController {
     }
   }
 
-  public async refresh({ response, auth }: HttpContextContract) {
-    const user = auth.use('api').user;
-    const token = auth.use('api').token;
-    if (!user || !token || !token.expiresAt) {
-      response.badRequest('Oops! Invalid Request');
-      return;
+  public async refresh({ request, response, auth }: HttpContextContract) {
+    const { authorization } = request.headers();
+    if (!authorization) {
+      return response.badRequest('You did not provided refresh token');
     }
+    const [, token] = authorization?.split('Bearer ');
+    const refreshToken = await RefreshToken.findBy('token', token);
+    if (!refreshToken) {
+      return response.badRequest('Token invalid');
+    }
+    await refreshToken.load('user');
+    const user = refreshToken.user;
     const accessToken = await auth.use('api').generate(user, {
-      expiresIn: '30mins',
+      expiresIn: '15mins',
       name: 'Access Token',
     });
-    const timeToExpirt = DateTime.fromJSDate(
-      token.expiresAt as unknown as Date,
-    ).diffNow('days').days;
 
-    if (timeToExpirt <= 1) {
-      const refreshToken = await auth.use('api').generate(user, {
-        expiresIn: '3d',
-        name: 'Refresh Token',
-      });
-      return { access: accessToken, refresh: refreshToken, user: auth.user };
-    } else {
-      return { access: accessToken, user: auth.user };
-    }
+    const newRefreshToken = await refreshToken
+      .merge({
+        token: uuid(),
+        expiresAt: refreshTokenExpiresTime(),
+      })
+      .save();
+
+    return { access: accessToken, refresh: newRefreshToken, user };
   }
 
   public async verify({ request, response }: HttpContextContract) {

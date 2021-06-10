@@ -9,6 +9,7 @@ import {
 } from '@ioc:Adonis/Lucid/Orm';
 import PasswordRecovery from './PasswordRecovery';
 import File from './File';
+import RefreshToken from './RefreshToken';
 
 export default class User extends BaseModel {
   @column({ isPrimary: true })
@@ -67,6 +68,9 @@ export default class User extends BaseModel {
 
   @hasMany(() => PasswordRecovery)
   public recoveries: HasMany<typeof PasswordRecovery>;
+
+  @hasMany(() => RefreshToken)
+  public refreshTokens: HasMany<typeof RefreshToken>;
 
   @hasMany(() => File)
   public files: HasMany<typeof File>;
