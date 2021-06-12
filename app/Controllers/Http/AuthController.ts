@@ -15,17 +15,19 @@ const refreshTokenExpiresTime = () =>
 const accessTokenExpiresTime = '1min';
 
 export default class AuthController {
-  public async signup({ request, response }: HttpContextContract) {
+  public async signup({ request, response, auth }: HttpContextContract) {
     const newUserSchema = schema.create({
       email: schema.string({ trim: true, escape: true }, [rules.email()]),
       password: schema.string({ trim: true }),
       fullname: schema.string(),
       username: schema.string({}, [rules.maxLength(16)]),
+      device: schema.string.optional(),
     });
     try {
-      const { email, username, fullname, password } = await request.validate({
-        schema: newUserSchema,
-      });
+      const { email, username, fullname, password, device } =
+        await request.validate({
+          schema: newUserSchema,
+        });
       const emailExist = await User.findBy('email', email);
       const usernameExists = await User.findBy('username', username);
       if (usernameExists || emailExist) {
@@ -34,7 +36,7 @@ export default class AuthController {
         });
         return;
       }
-      return await Database.transaction(async trx => {
+      const user = await Database.transaction(async trx => {
         const userData = new User().fill({
           email,
           username,
@@ -53,9 +55,22 @@ export default class AuthController {
               user,
             });
         });
-
         return user;
       });
+
+      // gerar os tokens
+      const access = await auth.use('api').generate(user, {
+        expiresIn: accessTokenExpiresTime,
+        name: 'Access Token',
+      });
+
+      const refresh = await user?.related('refreshTokens').create({
+        token: uuid(),
+        name: device,
+        expiresAt: refreshTokenExpiresTime(),
+      });
+
+      return { access, refresh, user };
     } catch (error) {
       console.log(error);
       response.badRequest(error.messages);
@@ -195,7 +210,7 @@ export default class AuthController {
     }
   }
 
-  public async forget({ request, response, bouncer }: HttpContextContract) {
+  public async forgot({ request, response, bouncer }: HttpContextContract) {
     const forgetSchema = schema.create({
       email: schema.string({ trim: true, escape: true }, [rules.email()]),
     });
@@ -231,6 +246,69 @@ export default class AuthController {
       });
     } catch (errors) {
       response.badRequest(errors.messages ?? 'Bad Request');
+    }
+  }
+
+  public async social({ response, request, ally, auth }: HttpContextContract) {
+    const socialSchema = schema.create({
+      provider: schema.enum(['github']),
+      email: schema.string({}, [rules.email()]),
+      name: schema.string({}),
+      image: schema.string.optional(),
+      accessToken: schema.string(),
+      device: schema.string(),
+    });
+    try {
+      const { provider, email, name, accessToken, device } =
+        await request.validate({
+          schema: socialSchema,
+        });
+      const userSocial = await ally.use(provider).userFromToken(accessToken);
+
+      if (!userSocial) {
+        return response.badRequest({
+          code: 'auth.social.invalidAcessToken',
+          message: 'Código de acesso invalido.',
+        });
+      }
+      if (userSocial.email !== email) {
+        return response.badRequest({
+          code: 'auth.social.unauthorizedAcessToken',
+          email: 'Token não autorizado',
+        });
+      }
+      let user = await User.findBy('email', email);
+      if (!user) {
+        user = await User.create({
+          email,
+          fullname: name,
+          username: generate(16), // melhorar essa parte
+          password: 'batata', // mudar pra permitir password nulos e setar uma propriedade chamada third-party auth
+          verifiedAt:
+            userSocial.emailVerificationState === 'verified'
+              ? DateTime.now()
+              : null,
+        });
+      }
+
+      const access = await auth.use('api').generate(user, {
+        expiresIn: accessTokenExpiresTime,
+        name: 'Access Token',
+      });
+
+      const refresh = await user?.related('refreshTokens').create({
+        token: uuid(),
+        name: device,
+        expiresAt: refreshTokenExpiresTime(),
+      });
+
+      return { access, refresh };
+    } catch (errors) {
+      return {
+        error: 'Provider Invalido',
+        code: 'social.provider.invalid',
+        errors: errors.messages,
+      };
     }
   }
 }

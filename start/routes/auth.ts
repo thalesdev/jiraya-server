@@ -9,7 +9,9 @@ export default () => {
       .as('revoke')
       .middleware('auth');
     Route.post('/verify', 'AuthController.verify').as('verifyEmail');
-    Route.post('/forget', 'AuthController.forget').as('forgetPassword');
+    Route.post('/forgot', 'AuthController.forgot').as('forgotPassword');
     Route.post('/recovery', 'AuthController.recovery').as('recoveryPassword');
+
+    Route.post('/social', 'AuthController.social').as('social');
   }).prefix('auth');
 };

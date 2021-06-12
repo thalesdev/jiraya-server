@@ -58,7 +58,7 @@ export default class User extends BaseModel {
   public rememberMeToken?: string;
 
   @column.dateTime({ autoCreate: false })
-  public verifiedAt: DateTime;
+  public verifiedAt: DateTime | null;
 
   @column.dateTime({ autoCreate: true })
   public createdAt: DateTime;
