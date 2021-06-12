@@ -12,6 +12,8 @@ import RefreshToken from 'App/Models/RefreshToken';
 const refreshTokenExpiresTime = () =>
   DateTime.fromSeconds(DateTime.now().toSeconds() + 60 * 60 * 24 * 7); // 7 days
 
+const accessTokenExpiresTime = '1min';
+
 export default class AuthController {
   public async signup({ request, response }: HttpContextContract) {
     const newUserSchema = schema.create({
@@ -73,7 +75,7 @@ export default class AuthController {
         schema: loginSchema,
       });
       const accessToken = await auth.use('api').attempt(email, password, {
-        expiresIn: '15mins',
+        expiresIn: accessTokenExpiresTime,
         name: 'Acess Token',
       });
       const refreshToken = await auth.user?.related('refreshTokens').create({
@@ -95,19 +97,18 @@ export default class AuthController {
   }
 
   public async refresh({ request, response, auth }: HttpContextContract) {
-    const { authorization } = request.headers();
-    if (!authorization) {
+    const token = request.input('token');
+    if (!token) {
       return response.badRequest('You did not provided refresh token');
     }
-    const [, token] = authorization?.split('Bearer ');
     const refreshToken = await RefreshToken.findBy('token', token);
     if (!refreshToken) {
-      return response.badRequest('Token invalid');
+      return response.unauthorized('Token invalid');
     }
     await refreshToken.load('user');
     const user = refreshToken.user;
     const accessToken = await auth.use('api').generate(user, {
-      expiresIn: '15mins',
+      expiresIn: accessTokenExpiresTime,
       name: 'Access Token',
     });
 
@@ -119,6 +120,31 @@ export default class AuthController {
       .save();
 
     return { access: accessToken, refresh: newRefreshToken, user };
+  }
+
+  public async revoke({ auth, request, response }: HttpContextContract) {
+    const user = auth.user;
+    await user?.load('refreshTokens');
+    const revokeSchema = schema.create({
+      token: schema.string({}, [rules.uuid()]),
+    });
+    try {
+      const { token } = await request.validate({ schema: revokeSchema });
+      const refreshToken = user?.refreshTokens.find(
+        refresh => refresh.token === token,
+      );
+      if (!refreshToken || !user)
+        return response.badRequest('Oops Bad Request!');
+
+      await refreshToken.delete();
+      await auth.logout();
+      await Database.query()
+        .from('api_tokens')
+        .where('user_id', '=', user.id)
+        .delete();
+    } catch (errors) {
+      return response.badRequest(errors.messages ?? 'Oops! Bad request');
+    }
   }
 
   public async verify({ request, response }: HttpContextContract) {

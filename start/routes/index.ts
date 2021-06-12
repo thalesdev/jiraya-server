@@ -31,7 +31,7 @@ Route.group(() => {
   File();
 
   Route.group(() => {
-    Route.get('/test', async ({ auth }) => {
+    Route.get('/me', async ({ auth }) => {
       const user = auth.user;
       return user;
     });
